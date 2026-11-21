@@ -178,8 +178,6 @@ public struct SettingsView: View {
             ))
             .labelsHidden()
             .toggleStyle(.switch)
-            .controlSize(.mini)
-            .tint(.blue)
             .help(provider.isEnabledInMenuBar ? "Отображается в трее" : "Скрыт из меню трея")
 
             VStack(alignment: .leading, spacing: 3) {

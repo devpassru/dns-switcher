@@ -187,6 +187,14 @@ public final class AppViewModel: ObservableObject {
         DNSHistoryStore.shared.clear()
     }
 
+    private func preserveCurrentVPNDNSIfActive(currentServers: [String]) {
+        guard SystemDNSManager.hasActiveVPNIPv4Interface() else { return }
+        let bootstrapIPs = Set(providers.flatMap { $0.bootstrapIPs })
+        let liveVPN = SystemDNSManager.detectActiveVPNDNSServers(ignoringBootstrapIPs: bootstrapIPs)
+        let filteredCurrent = currentServers.filter { !bootstrapIPs.contains($0) }
+        SystemDNSManager.preserveVPNDNSServers(liveVPN + filteredCurrent)
+    }
+
     @MainActor
     public func handleNetworkChange() {
         SystemDNSManager.clearCaches()
@@ -197,13 +205,19 @@ public final class AppViewModel: ObservableObject {
             return
         }
 
+        if !SystemDNSManager.hasActiveVPNIPv4Interface() {
+            SystemDNSManager.clearPreservedVPNDNSServers()
+        }
+
         let actual = SystemDNSManager.currentSystemDNSServers()
         if !actual.contains("127.0.0.1") {
+            preserveCurrentVPNDNSIfActive(currentServers: actual)
             // Re-apply 127.0.0.1 asynchronously so MainActor is not blocked by subprocess
             Task.detached(priority: .userInitiated) {
                 SystemDNSManager.setSystemDNS(servers: ["127.0.0.1"])
                 await MainActor.run { [weak self] in
                     guard let self = self else { return }
+                    LocalDoHProxy.shared.clearCache()
                     self.refreshSystemState()
                     let isVPN = SystemDNSManager.hasActiveVPNIPv4Interface()
                     if isVPN {
@@ -271,6 +285,8 @@ public final class AppViewModel: ObservableObject {
         // Check if our 127.0.0.1:53 bridge is active
         if Port53Bridge.isBridgeRunning() {
             isBridgeInstalled = true
+            preserveCurrentVPNDNSIfActive(currentServers: SystemDNSManager.currentSystemDNSServers())
+            LocalDoHProxy.shared.clearCache()
             let ok = SystemDNSManager.setSystemDNS(servers: ["127.0.0.1"])
             selectedProviderID = provider.id
             activeModeText = "Активен DoH • \(provider.name)"
